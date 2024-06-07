@@ -1,0 +1,247 @@
+---
+title: "Investigating the Attributes that Influence Player Ratings in FC24"
+author: "Ayman Khan"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(caret)
+library(dendextend)
+library(e1071)
+```
+
+### Research Question: What attributes influence player ratings in FC24 (How do the makers of the game decide how a player should be rated)?
+
+In this project, we aim to explore the key factors that influence player ratings in FC24. We will try to reverse engineer how the makers of the game decide what rating they should give each player. To achieve this, we will utilize a supervised learning algorithm known as Support Vector Machines (SVM). 
+
+Before we dive further into the project, SVM (Support Vector Machine) is an algorithm that helps to find the best possible line to separate classes. The support vectors are the points that are the closest to the line and they help to decide where the line should go. These points are crucial as they directly influence the position and orientation of the separating hyperplane.
+
+The algorithm's capacity to learn from data and provide predictions is referred to as the "machine" in SVM. The way SVM operates is by identifying the hyperplane that best divides the data points into various groups. A decision boundary that is multidimensional is known as a hyperplane. As the distance between the hyperplane and the closest points from each class (support vectors), the objective is to identify the hyperplane that maximizes the margin between the classes.
+
+The SVM can alter the space to suit a curved line that divides the points and classes if the points are arranged in a way that makes a linear or straight line impractical. The kernel trick is useful in this situation. In situations where the data is not linearly separable in its original space, a kernel is a function that converts the data into a higher-dimensional space, which facilitates the search for a separating hyperplane.
+
+In the case of our project, SVM helps to determine which player attributes are most important for determining a player’s rating. It then uses that information to predict ratings for other players. By analyzing the support vectors and the separating hyperplane, we can understand which physical attributes (like height, weight, and speed) are most influential in defining a player’s perceived value and effectiveness.
+
+For this project, we are using SVM for regression, not classification. This means that instead of separating classes, the SVM model finds the relationship between player attributes and their ratings. SVM helps to identify which player attributes are most important for determining a player's rating.
+
+### Data Preperation and Loadings:
+
+The dataset I am using for this project is obtained from Kaggle, where it consists of player ratings and attributes data from FC24. The dataset contains very useful variables that can help visualize and understand how a player’s rating could be influenced, and which variables have a positive or negative impact. 
+
+My data_subset dataframe is an aggregation of the data by player name to get the average values of all attributes. The data_subsetnation dataframe is similar but aggregated by nation to later analyze how ratings differ among different nations. The data_model dataframe is a subset of the data excluding non-numeric columns for use in the final model.
+```{r}
+data <- read.csv("all_players.csv")
+
+new_data <- data %>%
+  select(-X, -Nation, -Club, -Position, -Att.work.rate, -Def.work.rate, -Preferred.foot, -URL, -Gender, -GK)
+
+data_subset <- new_data %>%
+  group_by(Name) %>%
+  summarize_all(mean)
+
+data_model <- data %>%
+  select(-X, -Name, -Nation, -Club, -Position, -Att.work.rate, -Def.work.rate, -Preferred.foot, -URL, -Gender, -GK)
+
+data_subsetnation <- data %>%
+  select(-X, -Name, -Club, -Position, -Att.work.rate, -Def.work.rate, -Preferred.foot, -URL, -Gender, -GK) %>%
+  group_by(Nation) %>%
+  summarize_all(mean)
+```
+
+### Hierarchical Clustering:
+
+To understand the similarities between players based on their attributes, hierarchical clustering was performed. Hierarchical clustering is a type of unsupervised learning algorithm used for grouping similar data points into clusters. It builds a dendrogram, which is a hierarchical tree-like structure of clusters.
+
+The reason for using hierarchical clustering is to analyze the similarities and differences between groups of players, which can help make more uniform decisions about players and understand how they differ through their attributes.
+
+Below, the data is first being scaled. Since Name is a categorical variable, it is not included in the numerical scaling process. By scaling the data, each feature is standardized to have a mean of 0 and a standard deviation of 1. Scaling helps to normalize the data, ensuring that all features contribute equally to the distance calculations. Pairwise distances between the scaled data points are then calculated using the Euclidean distance formula by default, resulting in a distance matrix. By calculating these distances, the algorithm can quantify the similarities between each pair of players.
+```{r}
+data_subset_scaled <- scale(data_subset %>% select(-Name))
+
+data_subset_dist <- dist(data_subset_scaled)
+
+hc1 <- hclust(data_subset_dist)
+```
+
+
+Down below we have an overall cluster of all players, and since there are a lot of players not much can be seen so it will be easier to dissect by trying to use more descrete player options. So, we will break down the data into smaller pieces to perform hierarchical clustering.
+```{r}
+plot(hc1)
+```
+
+Before we look at players in general, I wanted to see if player attributes differed by country and if any countries are grouped together which could give us some underlying reasons to why players from one country could have similar ratings to another player from another country. After scaling and computing the distance of the subset of our data, we create another hierarchical cluster.
+```{r}
+datanation_subset_scaled <- scale(data_subsetnation %>% select(-Nation))
+
+datanation_subset_dist <- dist(datanation_subset_scaled)
+
+hc2 <- hclust(datanation_subset_dist)
+```
+
+
+The dendrogram shows the hierarchical structure of clusters, where nations are grouped based on the similarity of their player performances. Each cluster is represented by different colors. According to the dendrogram, we can see that the blue cluster contains the majority of the nations. This means that nations within this cluster have player ratings similar to each other, leading to overall ratings of players from those nations being similar. This could also be a tactic that the game uses when rating players.
+
+We can look at unique groupings, such as the cluster with the purple color, meaning countries like Pakistan and Azerbaijan consist of players with unique performance characteristics that set them apart from other clusters. The Dominican Republic, which falls in the red cluster, is also very unique since it is distinct from the others. Players from that nation have characteristics that are not quite similar to players from other nations. Even though it is similar to other nations in the red cluster, it has some distinct features since it is situated on its own branch, not too clustered with the others.
+
+Because we are working with a large and diverse dataset, some labels are still a bit crowded, but the use of colors helps to visually distinguish between the different clusters. Overall, this dendrogram can provide insight into how attributes impact player ratings by nation, as nations in the same cluster may share similar attributes among their players, which influences their overall ratings.
+```{r}
+par(mar = c(8, 4, 4, 2) + 0.1) 
+
+hc2 %>%
+  as.dendrogram() %>%
+  set("labels_cex", 0.8) %>%
+  set("leaves_pch", 19) %>%
+  color_branches(k = 4) %>%
+  color_labels(k = 4) %>%
+  place_labels(data_subsetnation$Nation) %>%
+  plot(horiz = FALSE, main = "Dendrogram of Player Performances by Nation")
+```
+
+Before when we tried to perform a hierarchical clustering on every player it was too crowded so now to get a better visual of the similarities and differences, we can perform hierarchical clustering on the top 50 players, as it helps to explore and understand the similarities and differences amongst the best-performing players in FC24. Before we start clustering, we first take the subset and arrange it in descending order and take the first 50 observations. Similar to the setup of our previous hierarchical clusterings, we scale the data, and perform our distance calculations. 
+```{r}
+top_players <- data_subset %>% 
+  arrange(desc(Overall)) %>% 
+  head(50)
+
+top_players_scaled <- scale(top_players %>% select(-Name))
+
+top_players_dist <- dist(top_players_scaled)
+
+hc_top_players <- hclust(top_players_dist)
+```
+
+
+Below is the dendrogram of the top 50 players. We can see four main clusters, and by examining the plot, we can infer that each cluster is divided based on player positions. The red cluster includes players like Marc-Andre ter Stegen, Alisson, and Ederson. This cluster represents goalkeepers, as these players are known for their goalkeeping abilities. The yellow cluster includes players like Wendie Renard and Virgil van Dijk, who are top defenders. This indicates that this cluster consists of defenders.
+The green cluster shows significant variance as it includes both attackers and midfielders. The common trait within this cluster is versatility or creative abilities, as these players have balanced attributes. The Blueish-purple cluster includes prominent attackers and forwards like Harry Kane and Robert Lewandowski, indicating a focus on offensive attributes.
+
+This dendrogram helps identify patterns, such as clusters of goalkeepers, defenders, midfielders, and attackers, which align with their roles on the field. It shows how players within each cluster could have similar ratings and how their positions could align with specific attributes which can influence their ratings.
+```{r}
+par(mar = c(12, 4, 4, 2) + 0.1) 
+hc_top_players %>%
+  as.dendrogram() %>%
+  color_branches(k=4) %>%
+  color_labels(k=4) %>%
+  place_labels(top_players$Name) %>%
+  plot(horiz = FALSE, main = "Dendrogram of the Top 50 Players")
+```
+
+### Principal Component Analysis:
+
+Principal Component Analysis (PCA) reduces the dimensionality of the dataset by transforming it into a smaller set of principal components that capture the maximum variance in the data. Each component indicates the amount of variability a variable can contribute. If an attribute loads heavily on PC1, it means that this attribute contributes significantly to the high variability within the dataset.
+
+In the results below, we see that PC1 explains 46.88% of the total variance in the data, indicating that variables within this component play a major role in the dataset’s variability. PC2 explains 17.52% of the total variance. Together, PC1 and PC2 account for 64.40% of the total variance. This means that nearly two-thirds of the variability in the dataset is captured by the first two principal components.
+
+When we examine the remaining principal components, they each explain progressively smaller proportions of the variance, providing less significant contributions to the overall variance. Therefore, the first few principal components are the most important, as they capture the bulk of the variability in the data, while the later components add relatively little new information. 
+
+```{r}
+pca <- prcomp(data_subset_scaled, center = TRUE, scale. = TRUE)
+
+summary(pca)
+```
+
+Using PCA, we can create a two-dimensional plot to help identify patterns. Since PC1 and PC2 explain the most variance in the dataset, we focus on these two components in the graph. The red arrows in the graph represent the player attributes, with the direction and length of the arrows indicating each variable’s contribution to the principal components. Longer arrows indicate a higher contribution to the variance.
+
+In this plot, we can also identify attributes that are positively correlated with each other by observing if they are close to each other and point in the same direction. Based on the plot, we can see that variables like Pace and Shooting are oriented towards PC1, with long arrows and close proximity to each other. This indicates that Pace and Shooting are positively correlated and contribute significantly to the variance explained by PC1.
+
+On the other hand, variables like Defending and Aggression are significant contributors to PC2. Pace and Shooting are negatively correlated with Defending and Aggression. Additionally, Pace and Shooting explain more of the variance within the entire dataset. From this plot, we can infer that “Pace”, "Shooting", "Defending", and "Aggression" are indeed attributes the game uses to evaluate a player’s overall rating. Most of the variables pointing towards either PC1 or PC2 tells us that they play a huge role in the variability of the dataset.
+
+In general, this plot helps us capture the essence of the variables that influence how the game decides player ratings. The principal component analysis reveals how each variable contributes to the variability within the dataset, providing insights into the key factors used in the rating process.
+
+```{r}
+biplot(pca, scale = 0, cex = 0.6, col = c("black", "red"), main = "PCA Biplot of Player Attributes")
+```
+
+### Splitting the data into train and test sets to evaluate our model:
+
+We split the data into 80% for the training data and 20% for the testing data as we want to train the model on a big dataset and test it on a smaller one to see how well our model works. By using data_model$Overall when splitting the data, we ensure that the training and testing sets have a similar distribution of the target variable, and this consideration of the Overall ratings also prevents bias by preventing imbalances.
+```{r}
+set.seed(123)
+training_index <- createDataPartition(data_model$Overall, p = 0.8, list = FALSE)
+training_data <- data_model[training_index, ]
+testing_data <- data_model[-training_index, ]
+```
+
+### Running the SVM Model on the data:
+
+SVM is a complex algorithm that works effectively with both classification and regression tasks. It is particularly powerful in high-dimensional spaces and can handle a large number of features, making it well-suited for complex datasets. One of the strengths of SVM is its resistance to over-fitting, as it focuses on the support vectors that define the decision boundary.
+
+In our project, due to the high variability within attributes as shown in our PCA plot, we can form a linear line within our data points since our first principal component explains most of the variance. By setting kernel = "linear", we are using a Linear SVM model, which attempts to form a line of best fit through the points in a linear manner. Despite fitting a linear line, SVM can also capture non-linear relationships, which is important because player ratings are influenced by multiple attributes that might have non-linear interactions.
+
+Our model predicts continuous values, utilizing regression tasks. To evaluate our model’s performance, we use Mean Squared Error (MSE), Root Mean Squared Error (RMSE), and R-squared (R²). MSE provides an average of the squared errors between the predicted and actual ratings; the lower the value, the better our model. Similarly, RMSE indicates the prediction error in the player ratings, with lower values again indicating a better model. R² explains how well our model accounts for the variance in player ratings. Values closer to 1 indicate a strong performance in its predictions.
+
+```{r}
+svm_model <- svm(Overall ~ ., data = training_data, kernel = "linear", scale = TRUE)
+
+svm_predictions <- predict(svm_model, testing_data)
+
+mse <- mean((svm_predictions - testing_data$Overall)^2)
+rmse <- sqrt(mse)
+r2 <- cor(svm_predictions, testing_data$Overall)^2
+```
+
+### Evaluating our Model:
+
+Our MSE indicates that, on average, the squared differences between the actual and predicted player ratings are 4.44. This value is quite good, as it suggests that the error rate is relatively low for our model. This is further supported by the RMSE, which shows that the error in our model’s predictions is about 2.10 rating points. The relatively low error rates indicate that our model provides nearly accurate predictions.
+
+R², on the other hand, measures how well the model’s predictions approximate the actual data. A value close to 1 is generally considered excellent. Our R² is 0.908, meaning that approximately 90.8% of the variance in player ratings can be explained by the model. These metrics indicate that our model is very close to accurate in predicting player ratings and fits the data well. The high R² value effectively captures the relationship between the attributes and player ratings.
+
+```{r}
+cat("Mean Squared Error (MSE):", mse, "\n")
+cat("Root Mean Squared Error (RMSE):", rmse, "\n")
+cat("R-squared (R2):", r2, "\n")
+```
+
+
+In order to check which attributes have the highest effects on player ratings, we need to obtain the associated coefficients of the variables. Since SVM is being used for regression tasks here, a variable’s importance will be associated with its coefficient. This approach differs from classification tasks, where we could directly use functions like VarImp to determine feature importance.
+
+Based on a Stack Overflow reference, the way to calculate the coefficients in the SVM model is by multiplying the transpose of the support vector coefficients by the support vectors themselves. The coefficients represent the weight of each feature in the SVM model. We then associate each feature with its corresponding coefficient. This step is crucial as it helps us understand how a player’s overall rating could be determined.
+
+We use these coefficients and plot them against their corresponding features to visualize which variables have the most significant influence. Based on the plot below, we can see that the top positive influencers of overall rating are Pace, Defending, Ball Control, Reactions, Physicality, Passing, Shot, and others. These attributes have high positive coefficients, emphasizing their importance in determining player ratings. Conversely, we observe negative influencers such as Sprint, Acceleration, and Standing. These attributes have negative coefficients, indicating that they do not necessarily contribute positively to the overall rating and might reflect a specific weighting system in the game’s rating algorithm.
+```{r}
+coefficients <- t(svm_model$coefs) %*% svm_model$SV
+
+importance_df <- data.frame(
+  Feature = colnames(training_data)[-which(names(training_data) == "Overall")],
+  Coefficient = as.vector(coefficients)
+)
+
+ggplot(importance_df, aes(x = reorder(Feature, Coefficient), y = Coefficient)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Feature Importance from SVM Model",
+       x = "Feature",
+       y = "Coefficient (Importance)") +
+  theme_minimal()
+```
+
+
+### Overall Findings:
+
+The SVM model, through its coefficients, effectively identifies which attributes are most influential in predicting player ratings. Attributes like Pace, which we can refer back to our PCA findings, have a high variance component facing towards PC1, which captures the highest variance in the dataset. This indicates that Pace plays a crucial role in predicting player ratings. The coefficients provide a clear portrayal of how each attribute affects player ratings. Positive coefficients suggest that increases in these attributes lead to higher ratings, while negative coefficients suggest the opposite.
+
+The feature importance plot above shows how the game developers might be prioritizing different skills and attributes. For instance, the attributes Ball, Pace, Reactions and Defending being top positive influencers suggest that speed, ball control and defensive capabilities are highly valued in the overall rating system. 
+
+The findings overall indicate that attributes related to speed, defense, and ball control play significant roles in the overall ratings. This information can be super helpful for both players who want to boost their ratings and developers who are fine-tuning the rating system. By getting a grip on these key factors, we can see how player performance is measured and how the game decides on player ratings. 
+
+
+### Citations:
+
+1. SVM Model: “SVM: Support Vector Machines.” RDocumentation, www.rdocumentation.org/packages/e1071/versions/1.7-14/topics/svm. Accessed 20 May 2024. 
+
+2. SVM Model: Le, James. “Support Vector Machines in R Tutorial.” DataCamp, DataCamp, 22 Aug. 2018, www.datacamp.com/tutorial/support-vector-machines-r. 
+
+3. DataSet: Beratozmen. “EA Sports FC 24 - Data Analysis.” Kaggle, Kaggle, 11 Dec. 2023, www.kaggle.com/code/beratozmen/ea-sports-fc-24-data-analysis/input?select=all_players.csv. 
+
+4. Code to find coefficients: Cem AkyuzCem Akyuz                      7322 silver badges88 bronze badges, and Maverick MeerkatMaverick Meerkat                      6. “How to Get Coefficients and p Values of SVM Model in R.” Stack Overflow, 1 Sept. 1963, stackoverflow.com/questions/48266766/how-to-get-coefficients-and-p-values-of-svm-model-in-r. 
+
+5. Dendrogram Leaf Node colors: Galili, Tal. Introduction to Dendextend, 24 Mar. 2023, cran.r-project.org/web/packages/dendextend/vignettes/dendextend.html. 
+
+6. coord_flip code: “Cartesian Coordinates with X and Y Flipped - Coord_flip.” - Coord_flip • Ggplot2, ggplot2.tidyverse.org/reference/coord_flip.html. Accessed 20 May 2024. 
